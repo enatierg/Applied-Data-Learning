@@ -1,3 +1,11 @@
+# This project analyses the effect of marketing investments and other factors on weekly sales using econometric regression models. Each marketing channel is evaluated individually and in combination with economic indicators to understand its contribution to overall sales.
+
+# Extensions to the basic analysis:
+# # Lagged variables are included to capture delayed effects of marketing investments.
+# # Linear regression and Lasso are used to identify the most influential variables on sales.
+# # Model diagnostics (R², RMSE, Durbin-Watson, Ljung-Box, Breusch-Pagan) are applied to ensure robustness.
+# # Marketing ROI is calculated for each channel based on model coefficients, allowing comparisons across campaigns.
+
 ---
 date: "`r Sys.Date()`"
 output:
@@ -380,4 +388,5 @@ print(significant_investment_coefs)
 knitr::kable(significant_investment_coefs, caption = "Significant Investment Coefficients (p < 0.05)")
 
 ```
+
 
