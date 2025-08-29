@@ -16,8 +16,8 @@ library(zoo)
 library(lmtest)
 
 set.seed(123)
-monthly_df <- read.csv("C:/Users/paula/Downloads/data_monthly.csv")
-weekly_df <- read.csv("C:/Users/paula/Downloads/data_weekly.csv")
+monthly_df <- read.csv("C:/Users/Name/Downloads/data_monthly.csv")
+weekly_df <- read.csv("C:/Users/Name/Downloads/data_weekly.csv")
 
 # Convert to Date format
 weekly_df$Date <- as.Date(weekly_df$Date, format="%d/%m/%Y")
@@ -380,3 +380,4 @@ print(significant_investment_coefs)
 knitr::kable(significant_investment_coefs, caption = "Significant Investment Coefficients (p < 0.05)")
 
 ```
+
