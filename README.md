@@ -1,7 +1,6 @@
 # Learning Projects in Data Analysis
 
-This repository contains a collection of projects I completed to explore and better understand the uses of different programming and data analysis concepts.  
-For each project, I have added a **preamble** to explain its purpose and what it demonstrates, so you can understand what each does and the ideas I was experimenting with.
+This repository contains a collection of projects I completed to explore and better understand the uses of different programming and data analysis concepts. For each project, I have added a **preamble** to explain its purpose and what it demonstrates, so you can understand what each does and the ideas I was experimenting with.
 
 ---
 
