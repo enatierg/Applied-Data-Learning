@@ -25,7 +25,7 @@ This project helped me gain hands-on experience with:
 
 ---
 
-### Marketing_Sales_Analysis.Rmd
+### Marketing_Analytics.Rmd
 **Purpose:**  
 This project is an R Markdown analysis exploring the impact of marketing investments and other factors on sales.  
 The main goal was to **practice data wrangling, regression modelling, and ROI analysis** using R.
