@@ -1,17 +1,7 @@
-# UAV Premium Calculator Automation
+Learning Projects in Data Analysis
 
-This is a simple automation project I built to streamline premium calculations for UAVs (unmanned aerial vehicles).  
-The main purpose was not to create a production-level tool, but rather to practice and explore Python’s data analysis stack.
+This repository contains a collection of projects I completed to explore and better understand the uses of different programming and data analysis concepts.
+For each project, I have added a prelude/preamble to explain its purpose and what it demonstrates, so you can understand what each does and the ideas I was experimenting with.
 
-## What it does
-- Automates the repetitive task of calculating premiums for UAVs.
-- Uses 'pandas' for data handling and tabular operations.
-- Leverages 'numpy' for numerical computations.
-- Provides a clean and reproducible workflow compared to manual spreadsheet calculations.
+UAVs_expsore.py -- This project is a simple automation script for calculating premiums for UAVs (unmanned aerial vehicles). The main goal was not to build a production-level tool, but to practice using Python’s data analysis stack.
 
-## Motivation
-This was more of an **exercise in using pandas and numpy** than an attempt at building a complex insurance engine.  
-The project allowed me to gain hands-on experience with:
-- Data cleaning and transformation
-- Vectorised computations
-- Structuring small automation scripts
