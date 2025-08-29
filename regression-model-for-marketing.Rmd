@@ -1,0 +1,382 @@
+---
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(lubridate)
+library(car)
+library(ggcorrplot)
+library(glmnet)
+library(broom)
+library(zoo)
+library(lmtest)
+
+set.seed(123)
+monthly_df <- read.csv("C:/Users/paula/Downloads/data_monthly.csv")
+weekly_df <- read.csv("C:/Users/paula/Downloads/data_weekly.csv")
+
+# Convert to Date format
+weekly_df$Date <- as.Date(weekly_df$Date, format="%d/%m/%Y")
+monthly_df$Date <- as.Date(monthly_df$Date, format="%d/%m/%Y")
+knitr::opts_chunk$set(warning = FALSE)
+
+```
+
+
+```{r}
+
+# expanding monthly to daily with interpolation 
+full_dates <- data.frame(Date = seq(min(weekly_df$Date), max(weekly_df$Date), by = "day"))
+monthly_expanded <- monthly_df %>%
+  complete(Date = full_dates$Date) %>%
+  mutate(across(c(unemployment, tourists, gdp, confidence), 
+                ~na.approx(., rule = 2)))
+
+# aggregating monthly-daily data to weekly data
+monthly_weekly <- monthly_expanded %>%
+  mutate(YearWeek = format(Date, "%G-%V")) %>%
+  group_by(YearWeek) %>%
+  summarise(across(c(unemployment, tourists, gdp, confidence), mean, na.rm = TRUE))
+weekly_df <- weekly_df %>%
+  mutate(YearWeek = format(Date, "%G-%V"))
+# merging
+merged_df <- weekly_df %>%
+  left_join(monthly_weekly, by = "YearWeek")
+
+# adding lagged variables (lag by 1 and 2 weeks) for all investment columns in hopes of capturing lagged effect
+
+investment_vars <- c("investment_tv", "investment_radio", "investment_press", 
+                     "investment_banners", "investment_online", 
+                     "investment_competition", "investment_competition_1", "investment_competition_2")
+merged_df <- merged_df %>%
+  arrange(Date) %>%
+  mutate(across(all_of(investment_vars), 
+                list(lag1 = ~lag(.x, 1), 
+                     lag2 = ~lag(.x, 2)), 
+                .names = "{col}_{fn}"))
+
+final_df <- merged_df %>% drop_na()
+final_df <- dplyr::select(final_df, -YearWeek)
+glimpse(final_df)
+
+```
+
+```{r}
+numeric_vars <- dplyr::select(
+  final_df %>% dplyr::select(-Date, -christmas_dummy),
+  where(is.numeric)
+)
+
+# computing and plotting correlation matrix to determine potential multicollinearity 
+cor_matrix <- cor(numeric_vars, use = "pairwise.complete.obs")
+
+ggcorrplot(cor_matrix, 
+           method = "circle",
+           type = "lower",
+           lab = TRUE,
+           lab_size = 1.2,
+           colors = c("blue", "white", "red"),
+           title = "Correlation matrix including lagged variables",
+           ggtheme = theme_minimal())
+
+
+```
+
+
+
+```{r}
+# fitting a very basic model to calculare vifs
+vif_model <- lm(sales ~ . - Date, data = final_df)
+ vif(vif_model)
+
+
+```
+
+
+```{r}
+vars_of_interest <- c("stores_opened", "confidence", "unemployment", "tourists","investment_banners","investment_competition_lag1","investment_banners_lag1","gdp","investment_tv_lag1","investment_competition","economy_index")
+
+cor(final_df %>%
+      dplyr::select(all_of(vars_of_interest)),
+    use = "pairwise.complete.obs")
+```
+```{r}
+
+
+final_df<- final_df %>% dplyr::select(-confidence,-investment_banners_lag1,-investment_competition_lag1,-investment_tv_lag1,-gdp)
+
+vif(lm(sales ~ . - Date, data = final_df))
+
+```
+
+
+
+
+```{r}
+
+model <- lm(sales ~ . - Date, data = final_df)
+summary(model)
+
+
+lm_coefs <- tidy(model) %>%
+  filter(str_detect(term, "investment|brand_knowledge")) %>%
+  dplyr::select(term, estimate, std.error, p.value)
+
+knitr::kable(lm_coefs, caption = "Linear model coefficients for marketing variables")
+
+```
+
+
+```{r}
+
+
+X <- model.matrix(sales ~ . - Date, data = final_df)[, -1]
+y <- final_df$sales
+
+lasso_fit <- cv.glmnet(X, y, alpha = 1, standardize =TRUE)
+
+lasso_coefs <- coef(lasso_fit, s = "lambda.min")
+lasso_df <- tibble(
+  term = rownames(lasso_coefs),
+  estimate = as.numeric(lasso_coefs)
+) %>%
+  filter(term != "(Intercept)" & estimate != 0) %>%
+  arrange(desc(abs(estimate)))
+
+knitr::kable(lasso_df, caption = "Lasso selected variables and coefficients")
+
+
+``` 
+
+
+
+```{r}
+
+train_index <- sample(seq_len(nrow(final_df)), size = floor(0.8 * nrow(final_df)))
+train_data <- final_df[train_index, ]
+test_data <- final_df[-train_index, ]
+
+X_train <- model.matrix(sales ~ . - Date, data = train_data)[, -1]
+y_train <- train_data$sales
+X_test <- model.matrix(sales ~ . - Date, data = test_data)[, -1]
+y_test <- test_data$sales
+
+model_ols_train <- lm(sales ~ . - Date, data = train_data)
+preds_ols <- predict(model_ols_train, newdata = test_data)
+
+lasso_cv_train <- cv.glmnet(X_train, y_train, alpha = 1, standardize = TRUE)
+preds_lasso <- predict(lasso_cv_train, s = "lambda.min", newx = X_test)
+
+rmse <- function(true, pred) sqrt(mean((true - pred)^2))
+r_squared <- function(true, pred) 1 - sum((true - pred)^2) / sum((true - mean(true))^2)
+
+rmse_ols <- rmse(y_test, preds_ols)
+rmse_lasso <- rmse(y_test, preds_lasso)
+baseline_rmse <- sqrt(mean((y_test - mean(y_train))^2))
+
+r2_ols <- r_squared(y_test, preds_ols)
+r2_lasso <- r_squared(y_test, preds_lasso)
+
+cat("Baseline RMSE:", baseline_rmse,"\n")
+cat("OLS RMSE on test set:", rmse_ols, "\n")
+cat("Lasso RMSE on test set:", rmse_lasso, "\n")
+
+cat("OLS R-squared on test set:", round(r2_ols,4), "\n")
+cat("Lasso R-squared on test set:", round(r2_lasso,4), "\n")
+
+```
+```{r,include=FALSE}
+
+model_reduced <- lm(
+  sales ~ investment_tv + investment_radio + investment_press + investment_banners + investment_online +
+    investment_competition +
+    economy_index + public_holidays + weather_index +
+    competitor_recognition_1 + competitor_recognition_2 + stores_opened +
+    investment_radio_lag2+unemployment+brand_knowledge,
+  data = final_df
+)
+
+final_vars <- c("investment_tv", "investment_radio", "investment_press", "investment_banners", "investment_online",
+                "investment_competition", "economy_index", "public_holidays", "weather_index",
+                "competitor_recognition_1", "competitor_recognition_2", "stores_opened",
+                "investment_radio_lag2", "unemployment", "brand_knowledge")
+
+all_vars <- names(final_df)
+all_vars <- setdiff(all_vars, c("sales", "Date"))
+removed_vars <- setdiff(all_vars, final_vars)
+
+cat("Variables removed from final model:\n")
+print(removed_vars)
+
+
+formula_base <- as.formula(paste("sales ~", paste(final_vars, collapse = " + ")))
+model_base <- lm(formula_base, data = final_df)
+
+for (var in removed_vars) {
+  # Fit extended model adding one removed variable
+  formula_test <- as.formula(paste("sales ~", paste(c(final_vars, var), collapse = " + ")))
+  model_test <- lm(formula_test, data = final_df)
+  
+  cat("\nTesting variable:", var, "\n")
+  print(anova(model_base, model_test))
+  cat("------------------------------------\n")
+}
+
+```
+
+```{r}
+
+model_reduced <- lm(
+  sales ~ investment_tv + investment_radio + investment_press + investment_banners + investment_online +
+    investment_competition +
+    economy_index + public_holidays + weather_index +
+    competitor_recognition_1 + competitor_recognition_2 + stores_opened +
+    investment_radio_lag2+investment_radio_lag1+unemployment+brand_knowledge+tourists,
+  data = final_df
+)
+
+cat("R-squared for model reduced:", summary(model_reduced)$r.squared, "\n")
+cat("Adjusted R-squared for model reduced:", summary(model_reduced)$adj.r.squared, "\n")
+
+# Durbin-Watson test for autocorrelation
+dw_result_reduced <- dwtest(model_reduced)
+cat("Durbin-Watson test p-value for model reduced:", dw_result_reduced$p.value, "\n")
+
+model_ols_test <- lm(sales ~ . - Date, data = final_df)
+residuals_ols <- residuals(model_ols_test)
+box_ols <- Box.test(residuals_ols, lag = 10, type = "Ljung-Box")
+box_ols_reduced <- Box.test(model_reduced$residuals, lag = 10, type = "Ljung-Box")
+box_ols <- Box.test(residuals_ols, lag = 10, type = "Ljung-Box")
+cat("Ljung-Box test p-value for OLS residuals:", box_ols$p.value, "\n")
+cat("Ljung-Box test p-value for OLS residuals reduced:", box_ols_reduced$p.value, "\n")
+
+
+```
+
+
+```{r}
+model_df <- train_data %>%
+  select(
+    sales,
+    matches("^investment"),  # includes all investment and investment_lag variables
+    economy_index, public_holidays, weather_index,
+    competitor_recognition_1, competitor_recognition_2, stores_opened,
+    unemployment, brand_knowledge, tourists
+  )
+
+test_model_df <- test_data %>%
+  select(
+    sales,
+    matches("^investment"),
+    economy_index, public_holidays, weather_index,
+    competitor_recognition_1, competitor_recognition_2, stores_opened,
+    unemployment, brand_knowledge, tourists
+  )
+
+model <- lm(sales ~ ., data = model_df)
+
+summary(model)
+
+dw_result <- dwtest(model)
+box_ols_model=Box.test(residuals(model), lag = 10, type = "Ljung-Box")
+shapiro_result <- shapiro.test(residuals(model))
+bp_result <- bptest(model)
+
+cat("R-squared for model:", summary(model)$r.squared, "\n")
+cat("Adjusted R-squared for model:", summary(model)$adj.r.squared, "\n")
+cat("Durbin-Watson test statistic:", dw_result$statistic, "\n")
+cat("Durbin-Watson test p-value:", dw_result$p.value, "\n")
+cat("Ljung-Box test p-value for OLS_model residuals:", box_ols_model$p.value, "\n")
+cat("Shapiro-Wilk test W statistic:", shapiro_result$statistic, "\n")
+cat("Shapiro-Wilk test p-value:", shapiro_result$p.value, "\n")
+cat("Breusch-Pagan test statistic:", bp_result$statistic, "\n")
+cat("Breusch-Pagan test p-value:", bp_result$p.value, "\n")
+
+
+```
+
+
+```{r}
+
+calculateroi <- function(df, coef_df, profit_margin = 0.5) {
+  roi_results <- tibble(channel = character(), total_sales_effect = numeric(),
+                        total_investment = numeric(), gross_roi = numeric(), net_roi = numeric())
+  
+  for (channel in c("tv", "radio", "press", "banners", "online")) {
+    # Match any lag suffixes or no suffix
+    pattern <- paste0("^investment_", channel, "(?:_lag\\d+)?$")
+    relevant_coefs <- coef_df %>% filter(str_detect(term, pattern))
+    
+    sales_effect <- rep(0, nrow(df))
+    total_investment <- 0
+    
+    for (i in seq_len(nrow(relevant_coefs))) {
+      col <- relevant_coefs$term[i]
+      coef_val <- relevant_coefs$estimate[i]
+      
+      if (col %in% names(df)) {
+        sales_effect <- sales_effect + df[[col]] * coef_val
+        total_investment <- total_investment + sum(df[[col]], na.rm = TRUE)
+      }
+    }
+    
+    gross <- ifelse(total_investment == 0, 0, sum(sales_effect, na.rm = TRUE) / total_investment)
+    net <- gross * profit_margin - 1
+    
+    roi_results <- roi_results %>% add_row(
+      channel = channel,
+      total_sales_effect = sum(sales_effect, na.rm = TRUE),
+      total_investment = total_investment,
+      gross_roi = gross,
+      net_roi = net
+    )
+  }
+  
+  return(roi_results)
+}
+
+
+ols_coefs <- tidy(model) %>%
+  filter(term != "(Intercept)" & str_detect(term, "investment")) %>%
+  select(term, estimate)
+
+ols_roi <- calculateroi(final_df, ols_coefs, profit_margin = 0.5) %>%
+  arrange(desc(net_roi)) %>%
+  mutate(across(where(is.numeric), round, 4))
+
+knitr::kable(ols_roi, caption = "OLS-Based Marketing ROI")
+
+
+```
+
+```{r}
+ggplot(ols_roi, aes(x = reorder(channel, net_roi), y = net_roi, fill = net_roi > 0)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  labs(title = "Net ROI by Marketing Channel", x = "Channel", y = "Net ROI") +
+  scale_fill_manual(values = c("red", "green")) +
+  theme_minimal()
+
+
+model_summary <- tidy(model)
+
+significant_coefs <- model_summary %>%
+  filter(p.value < 0.05 & term != "(Intercept)") %>%
+  arrange(p.value)
+print(significant_coefs)
+
+knitr::kable(significant_coefs, caption = "Significant Model Coefficients (p < 0.05)")
+
+
+significant_investment_coefs <- model_summary %>%
+  filter(p.value < 0.17 & str_detect(term, "^investment") & term != "(Intercept)") %>%
+  arrange(p.value)
+
+print(significant_investment_coefs)
+knitr::kable(significant_investment_coefs, caption = "Significant Investment Coefficients (p < 0.05)")
+
+```
